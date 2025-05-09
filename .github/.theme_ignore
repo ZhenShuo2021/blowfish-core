@@ -1,0 +1,45 @@
+# ignore file from the source code
+
+# folders
+.git
+.github
+.vscode
+assets/img
+exampleSite
+images
+node_modules
+
+# extensions
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.bmp
+*.tiff
+*.tif
+*.ico
+*.heic
+*.heif
+*.mp4
+
+# specific files
+blowfish_logo.png
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+findMissingTranslations.js
+FUNDING.yml
+genArticle.js
+genLang.js
+genLangLinks.js
+lighthouserc.js
+logo.png
+netlify.toml
+package-lock.json
+package.json
+processUsers.js
+README.id.md
+README.ja.md
+README.md
+README.zh-cn.md
+tailwind.config.js

@@ -1,0 +1,80 @@
+name: Sync Theme Release
+
+on:
+  schedule:
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      SHOULD_CONTINUE: ${{ steps.check.outputs.SHOULD_CONTINUE }}
+      LATEST_RELEASE: ${{ steps.check.outputs.LATEST_RELEASE }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: '.github/.theme_version'
+
+      - name: Check latest Theme version
+        id: check
+        run: |
+          latest_release=$(curl -s https://api.github.com/repos/nunocoracao/blowfish/releases/latest | jq -r .tag_name)
+          current_release=$(cat .github/.theme_version 2>/dev/null || echo none)
+          echo "CURRENT_RELEASE=$current_release"
+          echo "LATEST_RELEASE=$latest_release" | tee -a $GITHUB_OUTPUT
+          if [ "$latest_release" != "$current_release" ]; then
+            echo "SHOULD_CONTINUE=true" | tee -a $GITHUB_OUTPUT
+          else
+            echo "SHOULD_CONTINUE=false" | tee -a $GITHUB_OUTPUT
+          fi
+
+  sync-release:
+    if: ${{ needs.check-version.outputs.SHOULD_CONTINUE == 'true' }}
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run update script
+        id: run_update_script
+        run: |
+          if ./update.sh; then
+            echo "UPDATE_SUCCESS=true" >> $GITHUB_OUTPUT
+          else
+            echo "UPDATE_SUCCESS=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Check for changes
+        id: check_changes
+        if: steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        run: |
+          git diff --quiet || echo "CHANGES=true" >> $GITHUB_OUTPUT
+
+      - name: Commit changes
+        if: steps.check_changes.outputs.CHANGES == 'true' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Sync Blowfish release ${{ needs.check-version.outputs.LATEST_RELEASE }}"
+          git push
+
+          echo "${{ needs.check-version.outputs.LATEST_RELEASE }}" > .theme_version
+          git add .theme_version
+          git commit -m "Update Blowfish release tracking to ${{ needs.check-version.outputs.LATEST_RELEASE }}"
+          git push
+
+      - name: Create release
+        if: steps.check_changes.outputs.CHANGES == 'true' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-version.outputs.LATEST_RELEASE }}
+          name: Sync with Blowfish ${{ needs.check-version.outputs.LATEST_RELEASE }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
