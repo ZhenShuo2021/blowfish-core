@@ -9,7 +9,7 @@ branch="main"
 rm -rf $repo_dir
 git clone --filter=blob:none --sparse --no-checkout --depth 1 --branch "$branch" "$repo_url" $repo_dir
 cd $repo_dir
-git sparse-checkout set assets archetypes config data i18n layouts static
+git sparse-checkout set assets archetypes config data i18n layouts release-versions static
 git checkout
 
 # delete unnecessary files

@@ -26,13 +26,23 @@ A GitHub Action checks for new Blowfish releases every 8 hours. The update is au
 
 If you are the owner of the target repo, webhook payload object for [repository_dispatch](https://docs.github.com/en/webhooks/webhook-events-and-payloads#repository_dispatch) is a better choice.
 
-## Using This for Other Hugo Themes
+## How to Deploy for Other Themes
 
 This setup can be used with any Hugo theme that publishes releases. To adapt it for another theme, modify a few configuration files in the `.github` folder:
 
 - `.github/workflows/update.yml`: Update any references to `blowfish`, write your own `Check latest theme version`.
 - `.github/.theme_version`: Stores the current **release** version of the theme. If the upstream's **release** hasn't changed, the workflow will exit early.
 - `.github/update.sh`: The main script.
+
+Cloudflare Pages is free to use but requires configuration. The `deploy-preview` uses the [direct upload method](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/) to deploy pages, which doesn't require to maintain an extra build script. Add the following to GitHub Secrets:
+
+- [CLOUDFLARE\_ACCOUNT\_ID](https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/)
+- [CLOUDFLARE\_API\_TOKEN](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/)
+
+Also, ensure the GitHub Actions workflow has the following general permissions:
+
+- Read and write access
+- Permission to create and approve pull requests
 
 ## Acknowledgement
 

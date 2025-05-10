@@ -1,80 +1,234 @@
 name: Sync Theme Release
 
+env:
+  REPO_NAME: ${{ github.repository }}
+  SOURCE_REPO: nunocoracao/blowfish
+  SOURCE_REPO_NAME: blowfish
+  SOURCE_REPO_AUTHOR: github-actions[bot]
+  SOURCE_REPO_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+  DEPLOY_PROJECT_NAME: blowfish-core  # Cloudflare project name (pages)
+  DEFAULT_HUGO_VERSION: 0.147.1
+
 on:
   schedule:
     - cron: '0 */8 * * *'
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
-      SHOULD_CONTINUE: ${{ steps.check.outputs.SHOULD_CONTINUE }}
-      LATEST_RELEASE: ${{ steps.check.outputs.LATEST_RELEASE }}
+      SHOULD_CONTINUE: ${{ steps.determine_run.outputs.SHOULD_CONTINUE }}
+      LATEST_RELEASE: ${{ steps.determine_run.outputs.LATEST_RELEASE }}
+      BRANCH_NAME: ${{ steps.create_branch_name.outputs.BRANCH_NAME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine whether to run
+        id: determine_run
+        run: |
+          message="${{ github.event.head_commit.message }}"
+
+          if [ -z "$message" ] || echo "$message" | grep -iq "merge pull request"; then
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          latest_release=$(curl -s https://api.github.com/repos/${SOURCE_REPO}/releases/latest | jq -r .tag_name)
+          current_release=$(cat .github/.theme_version 2>/dev/null || echo none)
+          echo "CURRENT_RELEASE=$current_release"
+          echo "LATEST_RELEASE=$latest_release" >> $GITHUB_OUTPUT
+
+          if [ "$latest_release" == "$current_release" ]; then
+            echo "SHOULD_CONTINUE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "SHOULD_CONTINUE=true" >> $GITHUB_OUTPUT
+
+      - name: Create branch name
+        id: create_branch_name
+        if: steps.determine_run.outputs.SHOULD_CONTINUE == 'true'
+        run: |
+          branch_name="theme-update-$(echo ${{ steps.determine_run.outputs.LATEST_RELEASE }} | sed 's/[^a-zA-Z0-9]/-/g')"
+          echo "BRANCH_NAME=$branch_name" >> $GITHUB_OUTPUT
+
+  sync-release:
+    if: needs.check-version.outputs.SHOULD_CONTINUE == 'true'
+    needs: check-version
+    runs-on: ubuntu-latest
+    outputs:
+      PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          sparse-checkout: '.github/.theme_version'
-
-      - name: Check latest Theme version
-        id: check
-        run: |
-          latest_release=$(curl -s https://api.github.com/repos/nunocoracao/blowfish/releases/latest | jq -r .tag_name)
-          current_release=$(cat .github/.theme_version 2>/dev/null || echo none)
-          echo "CURRENT_RELEASE=$current_release"
-          echo "LATEST_RELEASE=$latest_release" | tee -a $GITHUB_OUTPUT
-          if [ "$latest_release" != "$current_release" ]; then
-            echo "SHOULD_CONTINUE=true" | tee -a $GITHUB_OUTPUT
-          else
-            echo "SHOULD_CONTINUE=false" | tee -a $GITHUB_OUTPUT
-          fi
-
-  sync-release:
-    if: ${{ needs.check-version.outputs.SHOULD_CONTINUE == 'true' }}
-    needs: check-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          fetch-depth: 0
 
       - name: Run update script
         id: run_update_script
         run: |
-          if ./update.sh; then
+          if .github/update.sh; then
             echo "UPDATE_SUCCESS=true" >> $GITHUB_OUTPUT
           else
             echo "UPDATE_SUCCESS=false" >> $GITHUB_OUTPUT
             exit 1
           fi
 
-      - name: Check for changes
-        id: check_changes
+      - name: Commit changes
         if: steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
         run: |
-          git diff --quiet || echo "CHANGES=true" >> $GITHUB_OUTPUT
+          git config user.name "${SOURCE_REPO_AUTHOR}"
+          git config user.email "${SOURCE_REPO_AUTHOR_EMAIL}"
+          branch_name="${{ needs.check-version.outputs.BRANCH_NAME }}"
+          if git ls-remote --heads origin "$branch_name" | grep -q "$branch_name"; then
+            git push origin --delete "$branch_name"
+          fi
 
-      - name: Commit changes
-        if: steps.check_changes.outputs.CHANGES == 'true' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Sync Blowfish release ${{ needs.check-version.outputs.LATEST_RELEASE }}"
-          git push
+          git commit -m "⬆️ Sync Blowfish release ${{ needs.check-version.outputs.LATEST_RELEASE }}"
 
-          echo "${{ needs.check-version.outputs.LATEST_RELEASE }}" > .theme_version
-          git add .theme_version
-          git commit -m "Update Blowfish release tracking to ${{ needs.check-version.outputs.LATEST_RELEASE }}"
-          git push
+          echo "${{ needs.check-version.outputs.LATEST_RELEASE }}" > .github/.theme_version
+          git add .github/.theme_version
+          git commit -m "⬆️ Update .theme_version to ${{ needs.check-version.outputs.LATEST_RELEASE }}"
+
+      - name: Create Pull Request
+        if: steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        id: create_pr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "Sync with Blowfish ${{ needs.check-version.outputs.LATEST_RELEASE }}"
+          author: "${SOURCE_REPO_AUTHOR} <${SOURCE_REPO_AUTHOR_EMAIL}>"
+          body: |
+            This PR synchronizes the theme with Blowfish release ${{ needs.check-version.outputs.LATEST_RELEASE }}.
+
+            A Cloudflare preview deployment will be available for review.
+
+            Please verify the changes before merging.
+          base: main
+          branch: ${{ needs.check-version.outputs.BRANCH_NAME }}
+          delete-branch: true
+          labels: theme-update
+
+  deploy-preview:
+    needs: [check-version, sync-release]
+    if: needs.sync-release.outputs.PR_NUMBER != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-version.outputs.BRANCH_NAME }}
+
+      - name: Read Hugo version
+        id: hugo-version
+        run: |
+          if [ -f "release-versions/hugo-latest.txt" ]; then
+            HUGO_VERSION=$(cat release-versions/hugo-latest.txt | sed 's/^v//')
+          else
+            HUGO_VERSION="${DEFAULT_HUGO_VERSION}"
+          fi
+          echo "HUGO_VERSION=${HUGO_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Setup Hugo
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: ${{ steps.hugo-version.outputs.HUGO_VERSION }}
+          extended: true
+
+      - name: Build site for preview
+        run: |
+          # Get our repo name
+          IFS='/' read -r _ repo_dir <<< "${REPO_NAME}"
+
+          # Clone the exampleSite and assets
+          git clone --sparse --filter=blob:none --no-checkout --depth=1 https://github.com/${SOURCE_REPO}.git theme
+          cd theme
+          git sparse-checkout set exampleSite assets static
+          git checkout
+          cp -r exampleSite ../
+          cp -r assets ../
+          cp -r static ../
+          cd ..
+
+          # Move the whole 'repo_dir' directory to theme directory temporarily
+          # Hugo requires the themesDir to have the same name as the config file
+          cd ..
+          mv "$repo_dir" "${SOURCE_REPO_NAME}"
+
+          # Work inside the theme directory
+          cd "${SOURCE_REPO_NAME}"
+          hugo -E -F --minify --source exampleSite --themesDir ../.. --buildDrafts -b "https://preview-${{ needs.check-version.outputs.BRANCH_NAME }}.pages.dev/"
+
+          # Rename 'theme_name' back to 'repo_dir'
+          cd .. && mv ${SOURCE_REPO_NAME} "$repo_dir" && cd "$repo_dir"
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy exampleSite/public --project-name=${{ env.DEPLOY_PROJECT_NAME }} --commit-dirty=true --branch=${{ needs.check-version.outputs.BRANCH_NAME }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on PR with Preview URL
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const deploymentUrl = '${{ steps.deploy.outputs.deployment-url }}';
+            const branchAliasUrl = '${{ steps.deploy.outputs.pages-deployment-alias-url }}';
+            const previewUrl = deploymentUrl || branchAliasUrl;
+
+            github.rest.issues.createComment({
+              issue_number: ${{ needs.sync-release.outputs.PR_NUMBER }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `📋 Preview deployment available at: [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.`
+            });
+
+  create-draft-release:
+    needs: deploy-preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest release info
+        id: fetch_release
+        run: |
+          VERSION=$(gh release view --repo ${SOURCE_REPO} --json tagName -q '.tagName')
+          BODY=$(gh release view --repo ${SOURCE_REPO} --json body -q .body)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "BODY<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create a new tag
+        run: |
+          git config user.name "${SOURCE_REPO_AUTHOR}"
+          git config user.email "${SOURCE_REPO_AUTHOR_EMAIL}"
+          git tag -a "${{ steps.fetch_release.outputs.VERSION }}" -m "Release ${{ steps.fetch_release.outputs.VERSION }}"
+          git push origin "${{ steps.fetch_release.outputs.VERSION }}"
 
       - name: Create release
-        if: steps.check_changes.outputs.CHANGES == 'true' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-version.outputs.LATEST_RELEASE }}
-          name: Sync with Blowfish ${{ needs.check-version.outputs.LATEST_RELEASE }}
-          draft: false
+          tag_name: ${{ steps.fetch_release.outputs.VERSION }}
+          name: Sync with ${{ env.SOURCE_REPO_NAME }} ${{ steps.fetch_release.outputs.VERSION }}
+          body: ${{ steps.fetch_release.outputs.BODY }}
+          draft: true
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
