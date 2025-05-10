@@ -196,7 +196,7 @@ jobs:
               body: `📋 Preview deployment available at: [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.`
             });
 
-  create-draft-release:
+  create-new-tag:
     needs: deploy-preview
     runs-on: ubuntu-latest
     permissions:
@@ -209,11 +209,6 @@ jobs:
         id: fetch_release
         run: |
           VERSION=$(gh release view --repo ${SOURCE_REPO} --json tagName -q '.tagName')
-          BODY=$(gh release view --repo ${SOURCE_REPO} --json body -q .body)
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "BODY<<EOF" >> $GITHUB_OUTPUT
-          echo "$BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -223,12 +218,3 @@ jobs:
           git config user.email "${SOURCE_REPO_AUTHOR_EMAIL}"
           git tag -a "${{ steps.fetch_release.outputs.VERSION }}" -m "Release ${{ steps.fetch_release.outputs.VERSION }}"
           git push origin "${{ steps.fetch_release.outputs.VERSION }}"
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.fetch_release.outputs.VERSION }}
-          name: Sync with ${{ env.SOURCE_REPO_NAME }} ${{ steps.fetch_release.outputs.VERSION }}
-          body: ${{ steps.fetch_release.outputs.BODY }}
-          draft: true
-          prerelease: false
