@@ -75,7 +75,7 @@ jobs:
         id: check_pr
         run: |
           existing_pr=$(gh pr list --state open --search "\"$PR_TITLE\"" --json number,title | jq -r '.[0].number // empty')
-          
+
           if [[ -n "$existing_pr" ]]; then
             echo "EXISTING_PR_FOUND=true" >> $GITHUB_OUTPUT
             echo "EXISTING_PR_NUMBER=$existing_pr" >> $GITHUB_OUTPUT
@@ -169,6 +169,41 @@ jobs:
           hugo-version: ${{ steps.hugo-version.outputs.HUGO_VERSION }}
           extended: true
 
+      - name: Get diff between tags from SOURCE_REPO
+        id: tag-diff
+        run: |
+          git clone --filter=blob:none --no-checkout --sparse https://github.com/${SOURCE_REPO}.git __source-repo
+          cd __source-repo
+
+          all_tags=$(git tag -l --sort=-version:refname)
+          latest_tag="${{ needs.check-version.outputs.LATEST_RELEASE }}"
+          previous_tag=""
+          found_latest=false
+          for tag in $all_tags; do
+            if [ "$tag" = "$latest_tag" ]; then
+              found_latest=true
+            elif [ "$found_latest" = true ]; then
+              previous_tag="$tag"
+              break
+            fi
+          done
+
+          if [ -z "$previous_tag" ]; then
+            echo "No previous tag found. Skipping diff."
+            echo "DIFF_CONTENT=" >> $GITHUB_OUTPUT
+          else
+            git diff --name-only "$previous_tag" "$latest_tag" -- ':!exampleSite' ':!exampleSite/*' > ../diff.txt
+            echo '### File Changes' > ../diff.md
+            while read file; do
+              echo "- $file" >> ../diff.md
+            done < ../diff.txt
+            DIFF_CONTENT=$(cat ../diff.md)
+            echo "DIFF_CONTENT<<EOF" >> $GITHUB_OUTPUT
+            echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          cd ..
+
       - name: Build site for preview
         run: |
           # Get our repo name
@@ -205,7 +240,7 @@ jobs:
           command: pages deploy exampleSite/public --project-name=${{ env.DEPLOY_PROJECT_NAME }} --commit-dirty=true --branch=${{ needs.check-version.outputs.BRANCH_NAME }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Comment on PR with Preview URL
+      - name: Comment on PR with Preview URL and Diff
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -213,12 +248,13 @@ jobs:
             const deploymentUrl = '${{ steps.deploy.outputs.deployment-url }}';
             const branchAliasUrl = '${{ steps.deploy.outputs.pages-deployment-alias-url }}';
             const previewUrl = deploymentUrl || branchAliasUrl;
+            const diffContent = `\n${{ steps.tag-diff.outputs.DIFF_CONTENT }}\n`;
 
             github.rest.issues.createComment({
               issue_number: ${{ needs.sync-release.outputs.PR_NUMBER }},
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `📋 Preview deployment available at: [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.`
+              body: `📋 Preview deployment available at: [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.\n${diffContent}`
             });
 
   create-new-tag:
