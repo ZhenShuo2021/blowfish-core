@@ -61,6 +61,8 @@ jobs:
     if: needs.check-version.outputs.SHOULD_CONTINUE == 'true'
     needs: check-version
     runs-on: ubuntu-latest
+    env:
+      PR_TITLE: "Sync with Blowfish ${{ needs.check-version.outputs.LATEST_RELEASE }}"
     outputs:
       PR_NUMBER: ${{ steps.create_pr.outputs.pull-request-number }}
     steps:
@@ -69,7 +71,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for existing PR
+        id: check_pr
+        run: |
+          existing_pr=$(gh pr list --state open --search "\"$PR_TITLE\"" --json number,title | jq -r '.[0].number // empty')
+          
+          if [[ -n "$existing_pr" ]]; then
+            echo "EXISTING_PR_FOUND=true" >> $GITHUB_OUTPUT
+            echo "EXISTING_PR_NUMBER=$existing_pr" >> $GITHUB_OUTPUT
+            echo "Found existing PR #$existing_pr with same title: $PR_TITLE"
+          else
+            echo "EXISTING_PR_FOUND=false" >> $GITHUB_OUTPUT
+            echo "No existing PR found with title: $PR_TITLE"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Skip if PR exists
+        if: steps.check_pr.outputs.EXISTING_PR_FOUND == 'true'
+        run: |
+          echo "Skipping sync process - PR #${{ steps.check_pr.outputs.EXISTING_PR_NUMBER }} already exists"
+          echo "PR URL: ${{ github.server_url }}/${{ github.repository }}/pull/${{ steps.check_pr.outputs.EXISTING_PR_NUMBER }}"
+          exit 0
+
       - name: Run update script
+        if: steps.check_pr.outputs.EXISTING_PR_FOUND == 'false'
         id: run_update_script
         run: |
           if .github/update.sh; then
@@ -80,7 +106,7 @@ jobs:
           fi
 
       - name: Commit changes
-        if: steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        if: steps.check_pr.outputs.EXISTING_PR_FOUND == 'false' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
         run: |
           git config user.name "${SOURCE_REPO_AUTHOR}"
           git config user.email "${SOURCE_REPO_AUTHOR_EMAIL}"
@@ -97,11 +123,11 @@ jobs:
           git commit -m "⬆️ Update .theme_version to ${{ needs.check-version.outputs.LATEST_RELEASE }}"
 
       - name: Create Pull Request
-        if: steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
+        if: steps.check_pr.outputs.EXISTING_PR_FOUND == 'false' && steps.run_update_script.outputs.UPDATE_SUCCESS == 'true'
         id: create_pr
         uses: peter-evans/create-pull-request@v7
         with:
-          title: "Sync with Blowfish ${{ needs.check-version.outputs.LATEST_RELEASE }}"
+          title: ${{ env.PR_TITLE }}
           author: "${SOURCE_REPO_AUTHOR} <${SOURCE_REPO_AUTHOR_EMAIL}>"
           body: |
             This PR synchronizes the theme with Blowfish release ${{ needs.check-version.outputs.LATEST_RELEASE }}.
@@ -111,7 +137,6 @@ jobs:
             Please verify the changes before merging.
           base: main
           branch: ${{ needs.check-version.outputs.BRANCH_NAME }}
-          delete-branch: true
           labels: theme-update
 
   deploy-preview:
