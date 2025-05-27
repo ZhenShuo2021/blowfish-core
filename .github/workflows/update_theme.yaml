@@ -209,6 +209,7 @@ jobs:
         id: fetch_release
         run: |
           VERSION=$(gh release view --repo ${SOURCE_REPO} --json tagName -q '.tagName')
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
