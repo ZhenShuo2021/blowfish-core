@@ -169,9 +169,10 @@ jobs:
           hugo-version: ${{ steps.hugo-version.outputs.HUGO_VERSION }}
           extended: true
 
-      - name: Get diff between tags from SOURCE_REPO
+      - name: Get diff between tags from SOURCE_REPO and compare with PR changes
         id: tag-diff
         run: |
+          # Get source repo changes between versions
           git clone --filter=blob:none --no-checkout --sparse https://github.com/${SOURCE_REPO}.git __source-repo
           cd __source-repo
 
@@ -189,20 +190,59 @@ jobs:
           done
 
           if [ -z "$previous_tag" ]; then
-            echo "No previous tag found. Skipping diff."
             echo "DIFF_CONTENT=" >> $GITHUB_OUTPUT
-          else
-            git diff --name-only "$previous_tag" "$latest_tag" -- ':!exampleSite' ':!exampleSite/*' > ../diff.txt
-            echo '### File Changes' > ../diff.md
-            while read file; do
-              echo "- $file" >> ../diff.md
-            done < ../diff.txt
-            DIFF_CONTENT=$(cat ../diff.md)
-            echo "DIFF_CONTENT<<EOF" >> $GITHUB_OUTPUT
-            echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          # Get changed files in source repo and PR
+          git diff --name-only "$previous_tag" "$latest_tag" -- ':!exampleSite' ':!exampleSite/*' > ../source_changes.txt
           cd ..
+          gh pr diff ${{ needs.sync-release.outputs.PR_NUMBER }} --name-only > core_pr_changes.txt
+
+          # Calculate counts
+          source_count=$(wc -l < source_changes.txt 2>/dev/null || echo 0)
+          core_count=$(wc -l < core_pr_changes.txt 2>/dev/null || echo 0)
+          missing_updates=$(comm -23 <(sort source_changes.txt) <(sort core_pr_changes.txt))
+          missing_count=$(echo "$missing_updates" | grep -c '^' 2>/dev/null || echo 0)
+
+          # Build report
+          echo "## 📊 Update Summary" > diff.md
+          echo "**Version:** $previous_tag → $latest_tag" >> diff.md
+          echo "" >> diff.md
+          echo "- **Source changes:** $source_count files" >> diff.md
+          echo "- **PR updates:** $core_count files" >> diff.md
+          echo "- **Missing files:** $missing_count files" >> diff.md
+          echo "" >> diff.md
+
+          if [ "$missing_count" -gt 0 ]; then
+            echo "## ⚠️ Missing Files" >> diff.md
+            echo "$missing_updates" | while read file; do
+              [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+            done
+            echo "" >> diff.md
+          fi
+
+          echo "## 📝 Source Repository Changes" >> diff.md
+          while read file; do
+            [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+          done < source_changes.txt
+          echo "" >> diff.md
+
+          echo "<details>" >> diff.md
+          echo "<summary>🔧 Core Repository PR Changes ($core_count files)</summary>" >> diff.md
+          echo "" >> diff.md
+          while read file; do
+            [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+          done < core_pr_changes.txt
+          echo "" >> diff.md
+          echo "</details>" >> diff.md
+
+          DIFF_CONTENT=$(cat diff.md)
+          echo "DIFF_CONTENT<<EOF" >> $GITHUB_OUTPUT
+          echo "$DIFF_CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build site for preview
         run: |
@@ -248,13 +288,13 @@ jobs:
             const deploymentUrl = '${{ steps.deploy.outputs.deployment-url }}';
             const branchAliasUrl = '${{ steps.deploy.outputs.pages-deployment-alias-url }}';
             const previewUrl = deploymentUrl || branchAliasUrl;
-            const diffContent = `\n${{ steps.tag-diff.outputs.DIFF_CONTENT }}\n`;
+            const diffContent = `${{ steps.tag-diff.outputs.DIFF_CONTENT }}`;
 
             github.rest.issues.createComment({
               issue_number: ${{ needs.sync-release.outputs.PR_NUMBER }},
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `📋 Preview deployment available at: [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.\n${diffContent}`
+              body: `📋 **Preview deployment available at:** [${previewUrl}](${previewUrl})\n\nPlease review the changes before merging the PR.\n\n${diffContent}`
             });
 
   create-new-tag:
