@@ -214,21 +214,21 @@ jobs:
           echo "**Version:** $previous_tag → $latest_tag" >> diff.md
           echo "" >> diff.md
           echo "- **Source changes:** $source_count files" >> diff.md
-          echo "- **PR updates:** $core_count files" >> diff.md
+          echo "- **PR updates:** $core_count files (include .github/.theme_version)" >> diff.md
           echo "- **Missing files:** $missing_count files" >> diff.md
           echo "" >> diff.md
 
           if [ "$missing_count" -gt 0 ]; then
-            echo "## ⚠️ Missing Files" >> diff.md
+            echo "## ⚠️ Missing Files ($missing_count files)" >> diff.md
             echo "$missing_updates" | while read file; do
-              [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+              [ -n "$file" ] && echo "- $file" >> diff.md
             done
             echo "" >> diff.md
           fi
 
-          echo "## 📝 Source Repository Changes" >> diff.md
+          echo "## 📝 Source Repository Changes ($source_count files)" >> diff.md
           while read file; do
-            [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+            [ -n "$file" ] && echo "- $file" >> diff.md
           done < source_changes.txt
           echo "" >> diff.md
 
@@ -236,7 +236,7 @@ jobs:
           echo "<summary>🔧 Core Repository PR Changes ($core_count files)</summary>" >> diff.md
           echo "" >> diff.md
           while read file; do
-            [ -n "$file" ] && echo "- \`$file\`" >> diff.md
+            [ -n "$file" ] && echo "- $file" >> diff.md
           done < core_pr_changes.txt
           echo "" >> diff.md
           echo "</details>" >> diff.md
