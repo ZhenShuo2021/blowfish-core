@@ -190,6 +190,7 @@ jobs:
           done
 
           if [ -z "$previous_tag" ]; then
+            echo "No previous tag found. Skipping diff."
             echo "DIFF_CONTENT=" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -245,6 +246,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Build site for preview
+        timeout-minutes: 3
         run: |
           # Get our repo name
           IFS='/' read -r _ repo_dir <<< "${REPO_NAME}"
