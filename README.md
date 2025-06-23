@@ -1,49 +1,29 @@
-# An Extreme Lightweight Version of Blowfish, Only 1.5% of Original Size
+# Auto-Sync Repo Core POC
 
-![Blowfish Logo](https://github.com/nunocoracao/blowfish/blob/main/logo.png?raw=true)
+The Hugo theme [Blowfish](https://github.com/nunocoracao/blowfish) is feature-rich but [heavy in size](https://github.com/nunocoracao/blowfish/issues/980). This POC automatically syncs Blowfish's core via GitHub workflow.
 
-The Hugo theme Blowfish is feature-rich but heavy in size. Since the upstream maintainer prefers to preserve full history, reducing the repository size directly isn't feasible.
+The workflow uses cron schedule to check for new releases, update files, create pull requests, build preview sites, and create a new tag. Everything is automatic.
 
-This repository provides a minimal replacement for the original Blowfish theme, aimed at faster clone time, which is particularly beneficial for CI. This is also known as the [Blowfish core](https://github.com/nunocoracao/blowfish/issues/980#issuecomment-1743626167).
+## Adaptation
 
-> Although this repository is built for Blowfish, the workflow and script are generic and can be reused for any Hugo theme that provides GitHub Releases.
+To use with another theme, modify these `.github` files:
 
-## Usage
+- `.github/workflows/update.yml`: Replace `blowfish` references and customize `Check latest theme version`
+- `.github/.theme_version`: Stores current release version for early exit if unchanged
+- `.github/update.sh`: Main script
 
-Simply add this repo as a submodule to your Hugo blog:
+## Preview Deployment
 
-```sh
-git submodule add -b main https://github.com/ZhenShuo2021/blowfish-core.git themes/blowfish
-```
+This POC uses Cloudflare Pages (free) with [direct upload](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/). Add these GitHub Secrets:
 
-That's it.
+- [CLOUDFLARE_ACCOUNT_ID](https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/)
+- [CLOUDFLARE_API_TOKEN](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/)
 
-## How It Works
-
-This repository is updated by a ~~Python~~ shell script that pulls files from the upstream Blowfish repository. It excludes images, scripts, and commit history, resulting in a clean, minimal version that is only **8.5MB—1.5%** of the original size.
-
-A GitHub Action checks for new Blowfish releases every 8 hours. The update is automatic unless the upstream repository introduces new folders or files that require changes in the .theme_ignore file.
-
-If you are the owner of the target repo, webhook payload object for [repository_dispatch](https://docs.github.com/en/webhooks/webhook-events-and-payloads#repository_dispatch) is a better choice.
-
-## How to Deploy for Other Themes
-
-This setup can be used with any Hugo theme that publishes releases. To adapt it for another theme, modify a few configuration files in the `.github` folder:
-
-- `.github/workflows/update.yml`: Update any references to `blowfish`, write your own `Check latest theme version`.
-- `.github/.theme_version`: Stores the current **release** version of the theme. If the upstream's **release** hasn't changed, the workflow will exit early.
-- `.github/update.sh`: The main script.
-
-Cloudflare Pages is free to use but requires configuration. The `deploy-preview` uses the [direct upload method](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/) to deploy pages, which doesn't require to maintain an extra build script. Add the following to GitHub Secrets:
-
-- [CLOUDFLARE\_ACCOUNT\_ID](https://developers.cloudflare.com/fundamentals/setup/find-account-and-zone-ids/)
-- [CLOUDFLARE\_API\_TOKEN](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/)
-
-Also, ensure the GitHub Actions workflow has the following general permissions:
+Required GitHub Actions permissions:
 
 - Read and write access
-- Permission to create and approve pull requests
+- Create and approve pull requests
 
 ## Acknowledgement
 
-The demo theme is Blowfish, from Nuno Coração (https://nunocoracao.com), MIT license.
+Demo theme: Blowfish by Nuno Coração (https://nunocoracao.com), MIT license.
